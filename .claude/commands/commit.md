@@ -11,3 +11,4 @@ Summarize all uncommitted changes and create a git commit.
 4. Stage relevant modified files (avoid secrets or unrelated files)
 5. Commit using a HEREDOC to preserve formatting
 6. Run `git status` to confirm success
+7. Run `git push` to push the commit to the remote
