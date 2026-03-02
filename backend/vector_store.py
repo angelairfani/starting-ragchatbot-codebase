@@ -165,11 +165,15 @@ class VectorStore:
             return
         
         documents = [chunk.content for chunk in chunks]
-        metadatas = [{
-            "course_title": chunk.course_title,
-            "lesson_number": chunk.lesson_number,
-            "chunk_index": chunk.chunk_index
-        } for chunk in chunks]
+        metadatas = []
+        for chunk in chunks:
+            meta = {
+                "course_title": chunk.course_title,
+                "chunk_index": chunk.chunk_index,
+            }
+            if chunk.lesson_number is not None:
+                meta["lesson_number"] = chunk.lesson_number
+            metadatas.append(meta)
         # Use title with chunk index for unique IDs
         ids = [f"{chunk.course_title.replace(' ', '_')}_{chunk.chunk_index}" for chunk in chunks]
         
