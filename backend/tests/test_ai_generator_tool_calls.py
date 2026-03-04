@@ -138,7 +138,8 @@ def test_tool_result_in_second_call_messages(generator):
     assert tool_result["content"] == "search result text"
 
 
-def test_second_call_has_no_tools(generator):
+def test_second_call_includes_tools(generator):
+    """Round 0 (second API call) is NOT the last round, so tools must be present."""
     first = _response("tool_use", [_tool_block()])
     second = _response("end_turn", [_text_block("Done")])
     generator.client.messages.create.side_effect = [first, second]
@@ -153,7 +154,95 @@ def test_second_call_has_no_tools(generator):
     )
 
     second_kwargs = generator.client.messages.create.call_args_list[1][1]
-    assert "tools" not in second_kwargs
+    assert "tools" in second_kwargs
+
+
+def test_two_sequential_tool_calls_makes_three_api_calls(generator):
+    first = _response("tool_use", [_tool_block(tool_id="tu_1")])
+    second = _response("tool_use", [_tool_block(tool_id="tu_2")])
+    third = _response("end_turn", [_text_block("Final answer")])
+    generator.client.messages.create.side_effect = [first, second, third]
+
+    tool_manager = MagicMock()
+    tool_manager.execute_tool.return_value = "result"
+
+    result = generator.generate_response(
+        query="test",
+        tools=[{"name": "search_course_content"}],
+        tool_manager=tool_manager,
+    )
+
+    assert generator.client.messages.create.call_count == 3
+    assert tool_manager.execute_tool.call_count == 2
+    assert result == "Final answer"
+
+
+def test_final_call_has_no_tools_after_two_rounds(generator):
+    first = _response("tool_use", [_tool_block(tool_id="tu_1")])
+    second = _response("tool_use", [_tool_block(tool_id="tu_2")])
+    third = _response("end_turn", [_text_block("Done")])
+    generator.client.messages.create.side_effect = [first, second, third]
+
+    tool_manager = MagicMock()
+    tool_manager.execute_tool.return_value = "result"
+
+    generator.generate_response(
+        query="test",
+        tools=[{"name": "search_course_content"}],
+        tool_manager=tool_manager,
+    )
+
+    third_kwargs = generator.client.messages.create.call_args_list[2][1]
+    assert "tools" not in third_kwargs
+
+
+def test_second_round_messages_include_both_tool_results(generator):
+    first = _response("tool_use", [_tool_block(tool_id="tu_1")])
+    second = _response("tool_use", [_tool_block(tool_id="tu_2")])
+    third = _response("end_turn", [_text_block("Done")])
+    generator.client.messages.create.side_effect = [first, second, third]
+
+    tool_manager = MagicMock()
+    tool_manager.execute_tool.return_value = "result"
+
+    generator.generate_response(
+        query="test",
+        tools=[{"name": "search_course_content"}],
+        tool_manager=tool_manager,
+    )
+
+    third_kwargs = generator.client.messages.create.call_args_list[2][1]
+    messages = third_kwargs["messages"]
+    # user, assistant(tu1), user(tr1), assistant(tu2), user(tr2)
+    assert len(messages) == 5
+    assert messages[0]["role"] == "user"
+    assert messages[1]["role"] == "assistant"
+    assert messages[2]["role"] == "user"
+    assert messages[3]["role"] == "assistant"
+    assert messages[4]["role"] == "user"
+
+
+def test_tool_execution_error_doesnt_crash(generator):
+    first = _response("tool_use", [_tool_block(tool_id="tu_1")])
+    second = _response("end_turn", [_text_block("Graceful answer")])
+    generator.client.messages.create.side_effect = [first, second]
+
+    tool_manager = MagicMock()
+    tool_manager.execute_tool.side_effect = Exception("tool failed")
+
+    result = generator.generate_response(
+        query="test",
+        tools=[{"name": "search_course_content"}],
+        tool_manager=tool_manager,
+    )
+
+    assert generator.client.messages.create.call_count == 2
+    assert result == "Graceful answer"
+    # Verify the error string was passed as tool_result content
+    second_kwargs = generator.client.messages.create.call_args_list[1][1]
+    tool_msg = second_kwargs["messages"][-1]
+    content = tool_msg["content"]
+    assert any("tool failed" in str(r.get("content", "")) for r in content)
 
 
 def test_direct_response_returned_without_tool_call(generator):
